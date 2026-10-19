@@ -1,0 +1,19 @@
+{
+  "name": "docent",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Docent: an open IDE that narrates your coding agent. Runs the real Claude Code CLI with Pairwatch built in.",
+  "license": "MIT",
+  "author": { "name": "Yash Sinha" },
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "dev": "npm --workspace packages/app run dev",
+    "build": "npm --workspace packages/app run build",
+    "package": "npm --workspace packages/app run package",
+    "check": "npm run check --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "postinstall": "node scripts/postinstall.mjs"
+  }
+}

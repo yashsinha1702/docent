@@ -1,0 +1,3 @@
+[submodule "vendor/pairwatch"]
+	path = vendor/pairwatch
+	url = https://github.com/yashsinha1702/pairwatch.git

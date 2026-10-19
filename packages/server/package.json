@@ -1,0 +1,25 @@
+{
+  "name": "@docent/server",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Docent's host side: pty sessions running claude, the Claude Code IDE protocol, transcript tailing, the Pairwatch host",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "check": "tsc -p tsconfig.json",
+    "test": "node --test test/*.spec.ts"
+  },
+  "dependencies": {
+    "@docent/core": "0.0.1",
+    "chokidar": "5.0.0",
+    "node-pty": "1.1.0",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0",
+    "@types/ws": "8.18.1",
+    "typescript": "5.9.3"
+  }
+}

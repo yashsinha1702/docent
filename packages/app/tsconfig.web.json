@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "types": ["electron-vite/node"],
+    "paths": {
+      "@/*": ["./src/renderer/src/*"],
+      "@docent/core": ["../core/index.ts"]
+    }
+  },
+  "include": ["src/renderer/src/**/*.ts", "src/renderer/src/**/*.tsx", "src/shared/**/*.ts", "src/preload/index.d.ts", "../core/claude-code-shim.d.ts"]
+}

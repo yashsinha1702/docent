@@ -1,0 +1,14 @@
+{
+  "name": "@docent/core",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Pairwatch's pure core (timeline, explainer, stage, concept cards) re-exported from the vendored submodule",
+  "license": "MIT",
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "scripts": {
+    "check": "tsc -p tsconfig.json",
+    "test": "node --test test/*.spec.ts"
+  }
+}

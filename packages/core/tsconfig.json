@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["index.ts", "claude-code-shim.d.ts", "test/**/*.ts", "../../vendor/pairwatch/pairwatch/hooks/core/**/*.ts", "../../vendor/pairwatch/pairwatch/types/index.d.ts"]
+}

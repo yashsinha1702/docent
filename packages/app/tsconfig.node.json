@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node", "electron-vite/node"],
+    "paths": {
+      "@docent/server": ["../server/src/index.ts"],
+      "@docent/core": ["../core/index.ts"]
+    }
+  },
+  "include": ["electron.vite.config.ts", "src/main/**/*.ts", "src/preload/**/*.ts", "src/shared/**/*.ts", "../core/claude-code-shim.d.ts"]
+}

@@ -1,0 +1,8 @@
+export { PtyManager } from './pty/manager.ts'
+export type { PtyHandle, PtySpawnOptions } from './pty/manager.ts'
+export { OscParser } from './pty/osc.ts'
+export type { OscEvent } from './pty/osc.ts'
+export { buildClaudeArgs, buildClaudeEnv, loginShellPath, resolveClaudeBinary } from './claude/spawn.ts'
+export type { ClaudeSpawnPlan } from './claude/spawn.ts'
+export { Workspace } from './workspace/fs.ts'
+export type { DirEntry } from './workspace/fs.ts'
