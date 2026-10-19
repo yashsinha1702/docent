@@ -6,4 +6,5 @@ export { buildClaudeArgs, buildClaudeEnv, loginShellPath, resolveClaudeBinary } 
 export type { ClaudeSpawnPlan } from './claude/spawn.ts'
 export { Workspace } from './workspace/fs.ts'
 export type { DirEntry } from './workspace/fs.ts'
-export type { Snapshot } from './pairwatch/types'
+export * from './ide/index.ts'
+export * from './pairwatch/index.ts'
