@@ -1,4 +1,4 @@
-import { existsSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
 import type { PairwatchHost } from '@docent/server'
@@ -37,7 +37,8 @@ const shellPath = loginShellPath()
 process.env.PATH = shellPath
 const claudeBinary = resolveClaudeBinary(shellPath)
 const ptys = new PtyManager()
-let workspace = new Workspace(initialWorkspace())
+// canonical (realpath) root: the CLI realpaths its cwd, so the paths it sends must compare equal to ours
+let workspace = new Workspace(realpathSync(initialWorkspace()))
 let win: BrowserWindow | undefined
 let pairwatch: PairwatchHost | undefined
 const ide = new RendererIde({ win: () => win, root: () => workspace.root, version: app.getVersion(), log: m => log(m) })
@@ -80,7 +81,7 @@ const send = (channel: 'pty:event' | 'watch:event', e: PtyEvent | WatchEvent) =>
 async function startPairwatch(): Promise<void> {
   const dir = pairwatchDir()
   try {
-    pairwatch = await startPairwatchHost({ pageDir: dir ? join(dir, 'viewer') : undefined })
+    pairwatch = await startPairwatchHost({ pageDir: dir ? join(dir, 'viewer') : undefined, log: m => log(m) })
   } catch (err) {
     log(`pairwatch host failed to start: ${String(err)}`)
     return
@@ -97,7 +98,7 @@ ipcMain.handle('workspace:choose', async (): Promise<WorkspaceInfo | undefined> 
   const r = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
   const picked = r.filePaths[0]
   if (r.canceled || !picked) return undefined
-  workspace = new Workspace(picked)
+  workspace = new Workspace(realpathSync(picked))
   return info()
 })
 ipcMain.handle('workspace:list', (_e, path: string): Promise<DirEntry[]> => workspace.list(path))

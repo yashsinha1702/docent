@@ -1,0 +1,13 @@
+.tab.diff { font-style: italic; }
+.diff-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.review-bar { display: flex; align-items: center; gap: 10px; padding: 4px 10px; font-size: 12px; border-bottom: 1px solid var(--line); background: #121c33; }
+.review-bar .review-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.review-bar .spacer { flex: 1; }
+.review-bar .review-error { color: #fca5a5; }
+.review-bar button.accept { color: #a7f3d0; border-color: #1f5f4a; }
+.review-bar button.reject { color: #fecaca; border-color: #5f1f2a; }
+.diff-host { flex: 1; min-height: 0; }
+/* the merge view scrolls as one so the aligned sides stay aligned; its editors grow to their content */
+.diff-host .cm-mergeView { height: 100%; overflow: auto; }
+.diff-host .cm-merge-a.cm-editor .cm-changedLine, .diff-host .cm-deletedChunk { background-color: rgba(248, 113, 113, .14); }
+.diff-host .cm-merge-b.cm-editor .cm-changedLine { background-color: rgba(74, 222, 128, .14); }

@@ -20,3 +20,14 @@ Every experiment that retired (or confirmed) a risk from the plan's assumptions 
 ## Install note (2026-10-19)
 
 `"postinstall": "electron-builder install-app-deps"` in `packages/app` recursed under npm workspaces: install-app-deps spawns `npm install`, which runs the workspace postinstall again (765 nested installs before it was killed). Removed. It is not needed anyway: node-pty 1.1.0 ships N-API prebuilds (`prebuilds/<platform>-<arch>/pty.node`) that load unchanged inside Electron, so `npmRebuild` is off in `packages/app/electron-builder.yml` and the only post-install step is the spawn-helper exec bit (`scripts/postinstall.mjs`).
+
+## End-to-end run (2026-10-19, `DOCENT_SMOKE=claude`, trusted scratch workspace, no prompt sent)
+
+| Assumption | Result |
+| --- | --- |
+| A4 `openDiff` result shapes | From the 2.1.303 binary: `FILE_SAVED` + final buffer → the CLI writes the file itself (Docent must not); `DIFF_REJECTED` → reverts; `TAB_CLOSED` → **applies the proposal** (`saved: false`), so a tab closed without a decision answers `DIFF_REJECTED` like the VS Code extension. Not yet exercised live (needs an Edit, which spends quota). |
+| A5 `--session-id` honoured | Yes: the snapshot file is `live/<the uuid we passed>.json`. |
+| A8 mod loads | Yes, in a trusted folder: the first snapshot (11.5 KB) is written at session start, before any prompt. In an untrusted folder the trust dialog blocks everything, including the IDE connection. |
+| A9 host mode | Docent bound 7979 and answered `/health`; in a later run a real viewer (started by the mod with `server.mjs --detach` when Docent's host went away at exit) held 7979 and Docent went into bridge mode, still receiving the snapshot. Both modes drive the Watch panel. |
+| IDE protocol (M6) | The CLI connected to `ws://127.0.0.1:<port>` within 1 s of spawn with only `CLAUDE_CODE_SSE_PORT` set (lock pid = Docent's main process): `notifications/initialized`, then `ide_connected {pid}`. The lock file is removed on exit. The terminal bar flips to "IDE linked". |
+| Tests | core 4, server 39 (ide 18, pairwatch 15, osc 3, spawn 3), app 35 (renderer ide relay 20, watch pure modules, editor helpers) — all under `node --test` with Node 22 type stripping. |

@@ -41,7 +41,7 @@ export class RendererIde implements IdeHost {
 
   /** Starts the per-terminal server; `bind` ties it to the pty once that exists. */
   async start(): Promise<IdeServer> {
-    const server = await startIdeServer({ host: this, ideName: 'Docent', version: this.deps.version })
+    const server = await startIdeServer({ host: this, ideName: 'Docent', version: this.deps.version, log: m => this.deps.log(m) })
     this.deps.log(`ide server on ${server.port}, lock ${server.lockPath}`)
     return server
   }
@@ -51,6 +51,13 @@ export class RendererIde implements IdeHost {
     server.onConnection(connected => {
       this.deps.log(`ide ${connected ? 'connected' : 'disconnected'} (pty ${ptyId})`)
       this.send({ type: 'connection', ptyId, connected })
+      // like the VS Code extension: the current selection shortly after the CLI connects
+      if (connected) {
+        setTimeout(() => {
+          const sel = this.state.selection ?? this.latest
+          if (sel && this.servers.get(ptyId) === server) server.notifySelectionChanged(sel)
+        }, 500).unref()
+      }
     })
   }
 
