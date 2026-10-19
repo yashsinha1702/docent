@@ -13,6 +13,7 @@ export function Terminal({ kind }: { kind: TerminalKind }) {
   const host = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<string>('starting…')
   const [command, setCommand] = useState<string>('')
+  const [linked, setLinked] = useState(false)
 
   useEffect(() => {
     const el = host.current
@@ -46,6 +47,10 @@ export function Terminal({ kind }: { kind: TerminalKind }) {
         const s = useStore.getState().session
         if (s?.ptyId === ev.id) useStore.getState().setSession({ ...s, ended: true })
       } else if (ev.type === 'title') setStatus(ev.title)
+    })
+    // the CLI connected to this window's IDE server (selection, @-mentions and diffs flow)
+    const offIde = window.docent.ide.onEvent(ev => {
+      if (ev.type === 'connection' && ev.ptyId === id) setLinked(ev.connected)
     })
     // Shift+Enter inserts a newline in the claude prompt: the CLI reads ESC CR (what VS Code's /terminal-setup sends)
     term.attachCustomKeyEventHandler(e => {
@@ -82,6 +87,7 @@ export function Terminal({ kind }: { kind: TerminalKind }) {
       closed = true
       ro.disconnect()
       off()
+      offIde()
       if (id) window.docent.pty.kill(id)
       term.dispose()
     }
@@ -94,6 +100,11 @@ export function Terminal({ kind }: { kind: TerminalKind }) {
         <span className="muted" title={command}>
           {status}
         </span>
+        {kind === 'claude' && (
+          <span className={`link ${linked ? 'on' : ''}`} title={linked ? 'claude is connected to Docent (selection, @-mentions, diffs)' : 'claude has not connected to Docent yet'}>
+            {linked ? 'IDE linked' : 'IDE…'}
+          </span>
+        )}
       </div>
       <div ref={host} className="term-host" />
     </div>

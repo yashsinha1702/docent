@@ -44,3 +44,5 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; background: #0a122
 .watch { border-left: 1px solid var(--line); background: var(--panel); overflow: auto; }
 .watch-inner { padding: 12px 14px; }
 .watch-title { font-weight: 700; margin-bottom: 8px; }
+.term-bar .link { margin-left: auto; font-size: 11px; color: var(--dim); border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; }
+.term-bar .link.on { color: #a7f3d0; border-color: #1f5f4a; }

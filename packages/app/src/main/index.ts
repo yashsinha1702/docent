@@ -1,10 +1,12 @@
 import { existsSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
-import { PtyManager, Workspace, buildClaudeArgs, buildClaudeEnv, loginShellPath, resolveClaudeBinary } from '@docent/server'
+import type { PairwatchHost } from '@docent/server'
+import { PtyManager, Workspace, buildClaudeArgs, buildClaudeEnv, loginShellPath, pairwatchSettings, resolveClaudeBinary, startPairwatchHost } from '@docent/server'
 import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
 
-import type { DirEntry, PtyEvent, PtySpawnRequest, PtySpawnResult, WorkspaceInfo } from '../shared/ipc'
+import type { DirEntry, PtyEvent, PtySpawnRequest, PtySpawnResult, WatchAction, WatchEvent, WatchHostStatus, WorkspaceInfo } from '../shared/ipc'
+import { RendererIde } from './ide'
 
 // DOCENT_SMOKE=1 opens the window with a plain shell in place of claude and quits after a few seconds;
 // DOCENT_SMOKE=claude does the same with the real claude. DOCENT_SMOKE_SHOT=<file.png> saves a capture first.
@@ -37,8 +39,11 @@ const claudeBinary = resolveClaudeBinary(shellPath)
 const ptys = new PtyManager()
 let workspace = new Workspace(initialWorkspace())
 let win: BrowserWindow | undefined
+let pairwatch: PairwatchHost | undefined
+const ide = new RendererIde({ win: () => win, root: () => workspace.root, version: app.getVersion(), log: m => log(m) })
 
 const info = (): WorkspaceInfo => ({ root: workspace.root, name: basename(workspace.root), claudeBinary, pairwatchDir: pairwatchDir() })
+const DOWN: WatchHostStatus = { mode: 'down', port: 0, note: 'Pairwatch host not started' }
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -69,7 +74,23 @@ function createWindow(): void {
   })
 }
 
-const send = (e: PtyEvent) => win?.webContents.send('pty:event', e)
+const send = (channel: 'pty:event' | 'watch:event', e: PtyEvent | WatchEvent) => win?.webContents.send(channel, e)
+
+/** Docent answers the Pairwatch mod as its viewer (or follows a viewer that already runs); snapshots flow to the panel. */
+async function startPairwatch(): Promise<void> {
+  const dir = pairwatchDir()
+  try {
+    pairwatch = await startPairwatchHost({ pageDir: dir ? join(dir, 'viewer') : undefined })
+  } catch (err) {
+    log(`pairwatch host failed to start: ${String(err)}`)
+    return
+  }
+  const s = pairwatch.status()
+  log(`pairwatch ${s.mode} on ${s.port}${s.note ? ` (${s.note})` : ''}; ${pairwatch.sessions().length} live snapshot(s)`)
+  pairwatch.onStatus(status => send('watch:event', { type: 'host', status }))
+  pairwatch.onSnapshot(({ sid, snapshot, updatedAt }) => send('watch:event', { type: 'snapshot', sid, snapshot, updatedAt }))
+  pairwatch.onRemoved(sid => send('watch:event', { type: 'removed', sid }))
+}
 
 ipcMain.handle('workspace:get', (): WorkspaceInfo => info())
 ipcMain.handle('workspace:choose', async (): Promise<WorkspaceInfo | undefined> => {
@@ -83,30 +104,60 @@ ipcMain.handle('workspace:list', (_e, path: string): Promise<DirEntry[]> => work
 ipcMain.handle('workspace:read', (_e, path: string): Promise<string> => workspace.read(path))
 ipcMain.handle('workspace:write', (_e, path: string, text: string): Promise<void> => workspace.write(path, text))
 
-ipcMain.handle('pty:spawn', (_e, req: PtySpawnRequest): PtySpawnResult => {
+ipcMain.handle('watch:sessions', () => pairwatch?.sessions() ?? [])
+ipcMain.handle('watch:host', (): WatchHostStatus => pairwatch?.status() ?? DOWN)
+ipcMain.handle('watch:action', async (_e, sid: string, action: WatchAction, value?: string): Promise<void> => {
+  if (!pairwatch) throw new Error('Pairwatch host is not running')
+  await pairwatch.press(sid, action, value)
+})
+
+ipcMain.handle('pty:spawn', async (_e, req: PtySpawnRequest): Promise<PtySpawnResult> => {
   const env = buildClaudeEnv(process.env, { path: shellPath })
   let file: string
   let args: string[]
   let sessionId: string | undefined
+  let idePort: number | undefined
+  let ideServer: Awaited<ReturnType<RendererIde['start']>> | undefined
   if (req.kind === 'claude' && SMOKE !== '1') {
     if (!claudeBinary) throw new Error('claude was not found on PATH. Install Claude Code, or set CLAUDE_BIN.')
-    const plan = buildClaudeArgs({ pluginDir: pairwatchDir(), resume: req.resume })
+    const viewer = pairwatch?.status()
+    const settings = viewer && viewer.mode !== 'down' ? (JSON.parse(pairwatchSettings(viewer.port)) as object) : undefined
+    const plan = buildClaudeArgs({ pluginDir: pairwatchDir(), resume: req.resume, settings })
     file = claudeBinary
     args = plan.args
     sessionId = plan.sessionId
+    // the IDE server first: its port in the environment is what makes the CLI connect to this window
+    try {
+      ideServer = await ide.start()
+      idePort = ideServer.port
+      env.CLAUDE_CODE_SSE_PORT = String(idePort)
+    } catch (err) {
+      log(`ide server failed to start, claude runs without the editor bridge: ${String(err)}`)
+    }
   } else {
     file = process.platform === 'win32' ? (process.env.COMSPEC ?? 'cmd.exe') : (process.env.SHELL ?? '/bin/zsh')
     args = process.platform === 'win32' ? [] : ['-l']
   }
-  const h = ptys.spawn({ file, args, cwd: workspace.root, env, cols: req.cols, rows: req.rows })
-  h.onData(data => send({ type: 'data', id: h.id, data }))
-  h.onExit(exitCode => send({ type: 'exit', id: h.id, exitCode }))
-  h.onOsc(ev => {
-    if (ev.kind === 'title') send({ type: 'title', id: h.id, title: ev.title })
-    else if (ev.kind === 'status') send({ type: 'status', id: h.id, raw: ev.raw })
+  let h: ReturnType<PtyManager['spawn']>
+  try {
+    h = ptys.spawn({ file, args, cwd: workspace.root, env, cols: req.cols, rows: req.rows })
+  } catch (err) {
+    void ideServer?.close()
+    throw err
+  }
+  if (ideServer) ide.bind(h.id, ideServer)
+  if (sessionId) pairwatch?.setWatched(sessionId)
+  h.onData(data => send('pty:event', { type: 'data', id: h.id, data }))
+  h.onExit(exitCode => {
+    ide.detach(h.id)
+    send('pty:event', { type: 'exit', id: h.id, exitCode })
   })
-  log(`spawned ${req.kind} pid ${h.pid}: ${file} ${args.join(' ')}`)
-  return { id: h.id, sessionId, command: [basename(file), ...args].join(' ') }
+  h.onOsc(ev => {
+    if (ev.kind === 'title') send('pty:event', { type: 'title', id: h.id, title: ev.title })
+    else if (ev.kind === 'status') send('pty:event', { type: 'status', id: h.id, raw: ev.raw })
+  })
+  log(`spawned ${req.kind} pid ${h.pid}: ${file} ${args.join(' ')}${idePort ? ` (ide port ${idePort})` : ''}`)
+  return { id: h.id, sessionId, command: [basename(file), ...args].join(' '), idePort }
 })
 ipcMain.on('pty:write', (_e, id: string, data: string) => ptys.get(id)?.write(data))
 ipcMain.on('pty:resize', (_e, id: string, cols: number, rows: number) => ptys.get(id)?.resize(cols, rows))
@@ -123,9 +174,10 @@ async function smoke(): Promise<void> {
   await new Promise(r => setTimeout(r, wait))
   try {
     const probe = await win?.webContents.executeJavaScript(
-      `JSON.stringify({ rows: document.querySelectorAll('.treelist .row').length, term: document.querySelector('.term-bar .muted')?.textContent, xtermRows: document.querySelectorAll('.xterm-rows > div').length })`,
+      `JSON.stringify({ rows: document.querySelectorAll('.treelist .row').length, term: document.querySelector('.term-bar .muted')?.textContent, xtermRows: document.querySelectorAll('.xterm-rows > div').length, watch: document.querySelector('.watch')?.textContent?.slice(0, 160) })`,
     )
     log(`smoke: dom ${probe}`)
+    log(`smoke: pairwatch ${JSON.stringify(pairwatch?.status() ?? DOWN)}, snapshots ${pairwatch?.sessions().length ?? 0}`)
     const shot = process.env.DOCENT_SMOKE_SHOT
     if (shot && win) {
       const img = await win.webContents.capturePage()
@@ -136,18 +188,27 @@ async function smoke(): Promise<void> {
     log(`smoke: probe failed: ${String(err)}`)
   }
   log('smoke: done')
-  await ptys.closeAll(500)
+  await shutdown(500)
   app.exit(0)
 }
 
-app.whenReady().then(() => {
+let closing: Promise<void> | undefined
+function shutdown(graceMs: number): Promise<void> {
+  closing ??= (async () => {
+    await Promise.allSettled([ptys.closeAll(graceMs), ide.closeAll(), pairwatch?.close()])
+  })()
+  return closing
+}
+
+app.whenReady().then(async () => {
   log(`workspace ${workspace.root}; claude: ${claudeBinary ?? 'not found'}; pairwatch: ${pairwatchDir() ?? 'not found'}`)
+  await startPairwatch()
   createWindow()
   if (SMOKE) void smoke()
 })
 app.on('window-all-closed', () => {
-  void ptys.closeAll().then(() => app.quit())
+  void shutdown(1500).then(() => app.quit())
 })
 app.on('before-quit', () => {
-  void ptys.closeAll(500)
+  void shutdown(500)
 })
