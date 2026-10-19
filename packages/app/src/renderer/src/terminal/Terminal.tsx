@@ -7,10 +7,12 @@ import { useEffect, useRef, useState } from 'react'
 
 import '@xterm/xterm/css/xterm.css'
 import type { TerminalKind } from '../../../shared/ipc'
+import { useStore } from '../store'
 
 export function Terminal({ kind }: { kind: TerminalKind }) {
   const host = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<string>('starting…')
+  const [command, setCommand] = useState<string>('')
 
   useEffect(() => {
     const el = host.current
@@ -41,6 +43,8 @@ export function Terminal({ kind }: { kind: TerminalKind }) {
       else if (ev.type === 'exit') {
         setStatus(`exited (${ev.exitCode})`)
         term.write('\r\n\x1b[2m[process exited]\x1b[0m\r\n')
+        const s = useStore.getState().session
+        if (s?.ptyId === ev.id) useStore.getState().setSession({ ...s, ended: true })
       } else if (ev.type === 'title') setStatus(ev.title)
     })
     // Shift+Enter inserts a newline in the claude prompt: the CLI reads ESC CR (what VS Code's /terminal-setup sends)
@@ -58,7 +62,9 @@ export function Terminal({ kind }: { kind: TerminalKind }) {
       .then(r => {
         if (closed) return window.docent.pty.kill(r.id)
         id = r.id
-        setStatus(r.command)
+        setCommand(r.command)
+        setStatus(kind === 'claude' && r.sessionId ? `claude · ${r.sessionId.slice(0, 8)}` : r.command)
+        if (kind === 'claude' && r.sessionId) useStore.getState().setSession({ sid: r.sessionId, ptyId: r.id })
         term.focus()
       })
       .catch(err => {
@@ -85,7 +91,9 @@ export function Terminal({ kind }: { kind: TerminalKind }) {
     <div className="term-wrap">
       <div className="term-bar">
         <span className="dot" />
-        <span className="muted">{status}</span>
+        <span className="muted" title={command}>
+          {status}
+        </span>
       </div>
       <div ref={host} className="term-host" />
     </div>

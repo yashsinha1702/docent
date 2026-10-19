@@ -3,12 +3,16 @@ import { create } from 'zustand'
 import type { WorkspaceInfo } from '../../shared/ipc'
 
 export type OpenFile = { path: string; text: string; dirty: boolean }
+/** The claude session running in the terminal: its id (also the Pairwatch snapshot's `sid`) and its pty. */
+export type TerminalSession = { sid: string; ptyId: string; ended?: boolean }
 
 type State = {
   workspace?: WorkspaceInfo
   files: OpenFile[]
   active?: string
+  session?: TerminalSession
   setWorkspace(w: WorkspaceInfo): void
+  setSession(s: TerminalSession | undefined): void
   open(path: string): Promise<void>
   update(path: string, text: string): void
   save(path: string): Promise<void>
@@ -18,7 +22,8 @@ type State = {
 
 export const useStore = create<State>((set, get) => ({
   files: [],
-  setWorkspace: workspace => set({ workspace, files: [], active: undefined }),
+  setWorkspace: workspace => set({ workspace, files: [], active: undefined, session: undefined }),
+  setSession: session => set({ session }),
   open: async path => {
     if (get().files.some(f => f.path === path)) return set({ active: path })
     const text = await window.docent.workspace.read(path)
