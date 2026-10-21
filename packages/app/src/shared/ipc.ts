@@ -66,7 +66,7 @@ export type WatchEvent =
 export type LiveSession = SessionUpdate & { ptyId: string }
 export type SessionEvent =
   | { type: 'update'; live: LiveSession }
-  /** spawned; the transcript is not written yet (Claude Code writes it at the first prompt) */
+  /** spawned, no update yet: the transcript is written at the first prompt (on --resume it is being read) */
   | { type: 'waiting'; ptyId: string; sid: string }
   /** the terminal exited; the last update stays valid */
   | { type: 'closed'; ptyId: string; sid: string }
