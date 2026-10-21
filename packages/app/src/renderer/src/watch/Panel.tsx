@@ -1,18 +1,27 @@
-import { useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import type { CSSProperties } from 'react'
+
+import { timeline } from '@docent/core'
+import type { Level } from '@docent/core'
 
 import type { Snapshot } from '../../../../../server/src/pairwatch/types'
 import type { WatchHostStatus } from '../../../shared/ipc'
 import { useStore } from '../store'
 import { Boundary } from './Boundary'
 import { Controls } from './Controls'
+import type { LocalControls } from './Controls'
+import { FromTranscript } from './FromTranscript'
 import { Stage } from './Stage'
-import { chooseSession, pickerSessions } from './choose.ts'
+import { Steps } from './Steps'
+import { ThisTurn } from './ThisTurn'
+import { choosePanelView, pickerSessions, transcriptSource } from './choose.ts'
+import type { TranscriptSource } from './choose.ts'
+import { anotherCard } from './transcript.ts'
 import { useWatchFeed } from './feed.ts'
 import { asText, levelOf, narrationLabel, narratorName, sessionLabel, staleText, stationColor } from './format.ts'
 import { renderMarkdown } from './markdown.ts'
 import { useWatchStore } from './store.ts'
-import { useNow } from './useNow.ts'
+import { useNow, useSince } from './useNow.ts'
 import './watch.css'
 
 /** The README's check for why a mod did not load, run after a `claude --debug` session. */
@@ -78,6 +87,46 @@ function Waiting({ awaiting }: { awaiting: boolean }) {
   )
 }
 
+/**
+ * Says where the panel's picture comes from when it is not the mod's: the transcript while the mod's first
+ * snapshot is awaited (the live model often lands first), else because the mod is not running, and why.
+ */
+function FromTranscriptNote({ host, source }: { host?: WatchHostStatus; source: TranscriptSource }) {
+  if (source === 'waiting') {
+    return (
+      <div className="watch-source">
+        <div>
+          <strong>From the transcript:</strong> waiting for the Pairwatch mod; drawn from the transcript meanwhile.
+        </div>
+        <p className="muted">The mod writes its first snapshot soon after the first prompt. Until it arrives, the stage, the narration and the card are drawn here from Claude Code’s transcript, with rules narration in place of Haiku’s.</p>
+        <details className="watch-diag">
+          <summary className="muted">Nothing arriving? Check that the mod loads</summary>
+          <Diagnostic />
+        </details>
+      </div>
+    )
+  }
+  const why =
+    host?.mode === 'down'
+      ? host.port > 0
+        ? `No Pairwatch viewer answers on port ${host.port}, so the mod has nowhere to write.`
+        : 'No Pairwatch viewer is reachable, so the mod has nowhere to write.'
+      : 'No snapshot from the mod has arrived for this session.'
+  return (
+    <div className="watch-source">
+      <div>
+        <strong>From the transcript:</strong> the Pairwatch mod is not running in this session.
+      </div>
+      <p className="muted">{why} The stage, the narration and the card are drawn here from Claude Code’s transcript, with rules narration in place of Haiku’s.</p>
+      {host?.mode === 'down' && host.note !== undefined && host.note !== '' && <p className="muted">{host.note}</p>}
+      <details className="watch-diag">
+        <summary className="muted">Why is the mod not running? Check that it loads</summary>
+        <Diagnostic />
+      </details>
+    </div>
+  )
+}
+
 /** A snapshot, top to bottom: the stage, the now-line, the Why? answer, the card, goal and recent, the note. */
 function Live({ snapshot, now }: { snapshot: Snapshot; now: number }) {
   // the mod's Markdown becomes HTML through the renderer above; `note` is plain text and stays text
@@ -106,16 +155,25 @@ function Live({ snapshot, now }: { snapshot: Snapshot; now: number }) {
   )
 }
 
-const couldNotDraw = (message: string) => (
+const cannotDraw = (what: string) => (message: string) => (
   <div className="watch-card watch-diag">
-    <strong>This snapshot could not be drawn</strong>
+    <strong>{what} could not be drawn</strong>
     <p className="muted">{message}</p>
   </div>
 )
+const couldNotDraw = cannotDraw('This snapshot')
+const couldNotDrawLive = cannotDraw('The transcript view')
+const couldNotDrawSteps = cannotDraw('The steps')
+const couldNotDrawTurn = cannotDraw('This turn')
 
 function Footer({ snapshot }: { snapshot: Snapshot }) {
   const level = levelOf(snapshot.level)
   return <div className="watch-footer muted">{`${narratorName(snapshot.narrator)} · ${narrationLabel(snapshot.narrationSource)} · level ${level.value} (${level.name})`}</div>
+}
+
+function LocalFooter({ level }: { level: Level }) {
+  const l = levelOf(level)
+  return <div className="watch-footer muted">{`from the transcript · rules narration · level ${l.value} (${l.name})`}</div>
 }
 
 export function WatchPanel() {
@@ -126,17 +184,42 @@ export function WatchPanel() {
   const listError = useWatchStore(s => s.listError)
   const picked = useWatchStore(s => s.picked)
   const pick = useWatchStore(s => s.pick)
+  const level = useWatchStore(s => s.level)
+  const setLevel = useWatchStore(s => s.setLevel)
   const terminal = useStore(s => s.session)
+  const live = useStore(s => s.live)
+  const root = useStore(s => s.workspace?.root)
   const panel = useRef<HTMLDivElement>(null)
-  const choice = useMemo(() => chooseSession(sessions, terminal, picked), [sessions, terminal, picked])
-  const list = useMemo(() => pickerSessions(sessions, choice.sid), [sessions, choice.sid])
-  const snapshot = choice.session?.snapshot
-  const now = useNow(15_000, snapshot !== undefined && snapshot.ended !== true)
+  const view = useMemo(() => choosePanelView(sessions, terminal, picked, live), [sessions, terminal, picked, live])
+  const list = useMemo(() => pickerSessions(sessions, view.sid), [sessions, view.sid])
+  const snapshot = view.kind === 'snapshot' ? view.session.snapshot : undefined
+  /** the live model under the stage: the steps strip and the stats */
+  const below = view.kind === 'none' ? undefined : view.live
+  const isRunning = below?.model.turn?.isRunning === true
+  const tick = useNow(isRunning ? 5_000 : 15_000, (snapshot !== undefined && snapshot.ended !== true) || below !== undefined)
+  // an update is never drawn as older than it is, whatever the last tick said
+  const now = Math.max(tick, below?.at ?? 0)
   const down = host?.mode === 'down'
   const pickerValue = picked !== undefined && sessions.has(picked) ? picked : ''
   // a choice is offered once there is a session other than the one on show
-  const showPicker = pickerValue !== '' || list.some(s => s.sid !== choice.sid)
-  const style = { '--st': stationColor(snapshot?.station) } as CSSProperties
+  const showPicker = pickerValue !== '' || list.some(s => s.sid !== view.sid)
+  const station = snapshot !== undefined ? snapshot.station : view.kind === 'live' ? timeline.currentActivity(view.live.model)?.station : undefined
+  const style = { '--st': stationColor(station) } as CSSProperties
+  const ended = snapshot?.ended === true || (view.kind === 'live' && terminal?.ended === true)
+  // how long the panel has drawn this session from the transcript without a snapshot arriving
+  const drawingSince = useSince(view.kind === 'live' ? view.sid : undefined)
+  const source = transcriptSource(host, ended, drawingSince === undefined ? undefined : now - drawingSince)
+
+  const fromLive = view.kind === 'live' ? view.live : undefined
+  const anotherTip = useCallback(() => {
+    if (fromLive === undefined) return
+    const st = useWatchStore.getState()
+    const card = st.card?.sid === fromLive.sid ? st.card : { sid: fromLive.sid }
+    const at = Date.now()
+    const next = anotherCard(card, fromLive.model, { level: st.level, seen: st.seen, recent: st.recent, now: at })
+    if (next !== undefined) st.putCard(next, at)
+  }, [fromLive])
+  const local = useMemo<LocalControls | undefined>(() => (fromLive === undefined ? undefined : { level, setLevel, anotherTip }), [fromLive, level, setLevel, anotherTip])
 
   return (
     <div ref={panel} className="watch-inner watch-panel" style={style}>
@@ -145,7 +228,7 @@ export function WatchPanel() {
         <span className="watch-status" title={hostError ?? host?.note}>
           {hostText(host, hostError)}
         </span>
-        {snapshot?.ended === true && <span className="watch-badge">ended</span>}
+        {ended && <span className="watch-badge">ended</span>}
       </div>
       {listError !== undefined && (
         <div className="watch-problem muted" title={listError}>
@@ -170,16 +253,31 @@ export function WatchPanel() {
           ))}
         </select>
       )}
-      {host?.mode === 'down' && <NotRunning host={host} />}
-      {snapshot !== undefined ? (
-        <Boundary resetOn={snapshot} fallback={couldNotDraw}>
-          <Live snapshot={snapshot} now={now} />
+      {view.kind === 'live' ? <FromTranscriptNote host={host} source={source} /> : down && host !== undefined && <NotRunning host={host} />}
+      {view.kind === 'snapshot' ? (
+        <Boundary resetOn={view.session.snapshot} fallback={couldNotDraw}>
+          <Live snapshot={view.session.snapshot} now={now} />
+        </Boundary>
+      ) : view.kind === 'live' ? (
+        <Boundary resetOn={view.live} fallback={couldNotDrawLive}>
+          <FromTranscript live={view.live} root={root} now={now} />
         </Boundary>
       ) : (
-        !down && <Waiting awaiting={choice.awaiting} />
+        !down && <Waiting awaiting={view.awaiting} />
       )}
-      <Controls sid={choice.sid} snapshot={snapshot} canSend={!down} panel={panel} />
-      {snapshot !== undefined && <Footer snapshot={snapshot} />}
+      <Controls sid={view.sid} snapshot={snapshot} canSend={!down} panel={panel} local={local} />
+      {below !== undefined && (
+        // apart, so that one that cannot be drawn leaves the other
+        <>
+          <Boundary resetOn={below} fallback={couldNotDrawSteps}>
+            <Steps live={below} root={root} now={now} />
+          </Boundary>
+          <Boundary resetOn={below} fallback={couldNotDrawTurn}>
+            <ThisTurn live={below} now={now} />
+          </Boundary>
+        </>
+      )}
+      {snapshot !== undefined ? <Footer snapshot={snapshot} /> : view.kind === 'live' && <LocalFooter level={level} />}
     </div>
   )
 }

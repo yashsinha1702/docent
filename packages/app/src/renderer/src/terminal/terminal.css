@@ -1,0 +1,15 @@
+/* The status chip in the terminal bar: Claude Code's own program status (OSC 7501). */
+.term-status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 45%; font-size: 11px; border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; white-space: nowrap; overflow: hidden; color: var(--dim); }
+.term-status-label { flex: none; font-weight: 600; }
+.term-status-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 400; opacity: .9; }
+.term-status.working { color: #c4b5fd; }
+.term-status.blocked { color: #fbbf24; border-color: #7a5512; background: rgba(251, 191, 36, .08); }
+.term-status.done { color: #86efac; border-color: #1f5f4a; }
+.term-status.error { color: #f87171; border-color: #7f1d1d; }
+.term-status.idle { color: var(--dim); }
+.term-tasks { flex: none; max-width: 30%; text-overflow: ellipsis; }
+.term-spin { flex: none; width: 8px; height: 8px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: term-spin .9s linear infinite; }
+@keyframes term-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .term-spin { animation: none; border-right-color: currentColor; opacity: .6; }
+}

@@ -35,3 +35,14 @@ export function enabledActions(snapshot: Snapshot | undefined, canSend: boolean)
     level: live !== undefined,
   }
 }
+
+/** Why a button that needs the mod does nothing while the panel draws from the transcript. */
+export const NEEDS_MOD = 'Needs the Pairwatch mod; no snapshot from it has reached this session'
+
+/**
+ * The buttons while the panel draws from the transcript: Why?, I know this and Pause need the mod;
+ * Another tip and the level work locally (a card from the transcript's concepts, the card's wording).
+ */
+export function fallbackActions(canTip: boolean): ActionFlags {
+  return { why: false, tip: canTip, known: false, pause: false, level: true }
+}

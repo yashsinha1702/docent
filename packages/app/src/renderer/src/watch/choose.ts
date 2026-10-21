@@ -1,5 +1,5 @@
 // Which session the panel shows. Pure, so the rule is testable without React.
-import type { WatchSession } from '../../../shared/ipc'
+import type { WatchHostStatus, WatchSession } from '../../../shared/ipc'
 
 /** The terminal's claude session, as ../store keeps it. */
 export type TerminalRef = { sid: string; ended?: boolean }
@@ -52,4 +52,46 @@ export function pickerSessions(sessions: ReadonlyMap<string, WatchSession>, show
   const own = shown === undefined ? undefined : sessions.get(shown)
   if (own !== undefined && !top.includes(own)) top.push(own)
   return top
+}
+
+/** What the panel draws: a snapshot from the mod, the terminal session's live model in its place, or nothing yet. */
+export type PanelView<L> =
+  /** `live` rides along when it is the same session: the steps and stats below the stage come from it */
+  | { kind: 'snapshot'; sid: string; session: WatchSession; live?: L }
+  | { kind: 'live'; sid: string; live: L }
+  | { kind: 'none'; sid?: string; awaiting: boolean }
+
+/**
+ * The snapshot wins whenever the mod wrote one for the session on show. When the terminal's session has
+ * none (Pairwatch down, the mod not loaded, or not written yet) but its live model exists, the panel is
+ * drawn from that model, also once the terminal ended: its own transcript says more than another
+ * session's snapshot. A session picked by hand is always shown as picked.
+ */
+export function choosePanelView<L extends { sid: string }>(sessions: ReadonlyMap<string, WatchSession>, terminal: TerminalRef | undefined, picked: string | undefined, live: L | undefined): PanelView<L> {
+  const byHand = picked !== undefined && sessions.has(picked)
+  const ownHasSnapshot = live !== undefined && (sessions.has(live.sid) || (terminal !== undefined && sessions.has(terminal.sid)))
+  if (!byHand && live !== undefined && !ownHasSnapshot) return { kind: 'live', sid: live.sid, live }
+  const choice = chooseSession(sessions, terminal, picked)
+  if (choice.session !== undefined && choice.sid !== undefined) {
+    return live !== undefined && live.sid === choice.sid ? { kind: 'snapshot', sid: choice.sid, session: choice.session, live } : { kind: 'snapshot', sid: choice.sid, session: choice.session }
+  }
+  return choice.sid === undefined ? { kind: 'none', awaiting: choice.awaiting } : { kind: 'none', sid: choice.sid, awaiting: choice.awaiting }
+}
+
+/**
+ * How long the panel waits for the mod's first snapshot of a session it draws from the transcript before
+ * it says the mod is not running: the live model often lands first, at every session start.
+ */
+export const MOD_GRACE_MS = 20_000
+
+/** What the panel says while it draws from the transcript: still waiting for the mod, or the mod is not running. */
+export type TranscriptSource = 'waiting' | 'not-running'
+
+/**
+ * Not running when no viewer is up (the mod has nowhere to write), once the terminal ended, or when no
+ * snapshot came within MOD_GRACE_MS of the panel drawing this session (`waitedMs`; undefined: just began).
+ */
+export function transcriptSource(host: WatchHostStatus | undefined, ended: boolean, waitedMs: number | undefined): TranscriptSource {
+  if (host?.mode === 'down' || ended) return 'not-running'
+  return waitedMs !== undefined && waitedMs >= MOD_GRACE_MS ? 'not-running' : 'waiting'
 }

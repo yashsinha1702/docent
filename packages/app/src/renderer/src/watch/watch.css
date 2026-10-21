@@ -44,3 +44,41 @@
 .watch-waiting > strong, .watch-diag > strong { display: block; margin-bottom: 4px; }
 .watch-diag summary { cursor: pointer; margin-top: 6px; }
 .watch-cmd { display: block; white-space: pre-wrap; word-break: break-all; padding: 6px 8px; margin: 6px 0; user-select: all; }
+
+/* Drawn from the transcript: the source note above the stage. */
+.watch-source { font-size: 12px; border: 1px dashed var(--line); border-radius: 10px; padding: 6px 10px; overflow-wrap: anywhere; }
+.watch-source p { margin: 4px 0 0; }
+
+/* The steps strip and the This-turn block: the live model, under the stage. */
+.watch-steps, .watch-turn { display: flex; flex-direction: column; gap: 4px; }
+.watch-section-head { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.watch-section-title { font-weight: 600; }
+.watch-step-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.watch-step { --step: var(--line); }
+.watch-step.running { --step: var(--accent); }
+.watch-step.ok { --step: #34d399; }
+.watch-step.error { --step: #f87171; }
+.watch-step.denied { --step: #fbbf24; }
+.watch-step-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; text-align: left; font-size: 12px; line-height: 1.3; padding: 3px 6px; border: 0; border-left: 2px solid var(--step); border-radius: 4px; background: transparent; color: inherit; cursor: default; }
+button.watch-step-row { cursor: pointer; }
+button.watch-step-row:hover { background: #17233b; }
+button.watch-step-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.watch-step-glyph { flex: none; width: 18px; text-align: center; font-size: 12px; }
+.watch-step.running .watch-step-glyph { animation: watch-pulse 1.4s ease-in-out infinite; }
+@keyframes watch-pulse { 50% { opacity: .4; } }
+.watch-step-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.watch-step-headline, .watch-step-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.watch-step-note { color: var(--dim); font-size: 11px; }
+.watch-step.error .watch-step-note { color: #fca5a5; }
+.watch-step.denied .watch-step-note { color: #fcd34d; }
+.watch-step-lane { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #fdba74; border: 1px solid #7c3f12; border-radius: 8px; padding: 0 5px; }
+.watch-step-when { flex: none; color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+.watch-turn dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; margin: 0; font-size: 12px; }
+.watch-turn dt { color: var(--dim); }
+.watch-turn dd { margin: 0; display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.watch-turn .watch-sent { overflow-wrap: anywhere; }
+
+@media (prefers-reduced-motion: reduce) {
+  .watch-step.running .watch-step-glyph { animation: none; }
+}

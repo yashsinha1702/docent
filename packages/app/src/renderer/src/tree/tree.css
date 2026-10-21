@@ -1,0 +1,4 @@
+/* File heat: the tint itself is inline (its strength fades with time); the dot marks a collapsed folder with warm files. */
+.treelist .heat-dot { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; vertical-align: middle; }
+.treelist .heat-dot.read { background: rgb(96, 165, 250); }
+.treelist .heat-dot.edit { background: rgb(251, 191, 36); }

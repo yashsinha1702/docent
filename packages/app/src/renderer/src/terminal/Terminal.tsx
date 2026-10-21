@@ -3,17 +3,42 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal as XTerm } from '@xterm/xterm'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import '@xterm/xterm/css/xterm.css'
 import type { TerminalKind } from '../../../shared/ipc'
 import { useStore } from '../store'
+import { NO_PROGRAM, applyProgram, chipView } from './status.ts'
+import type { ChipView, ProgramView } from './status.ts'
+import './terminal.css'
+
+/** Claude's own status for this terminal (OSC 7501), and its background tasks when they report. */
+function StatusChips({ view }: { view: ChipView }) {
+  const { main, tasks } = view
+  return (
+    <>
+      {main !== undefined && (
+        <span className={`term-status ${main.tone}`} title={main.title} role="status">
+          {main.tone === 'working' && <span className="term-spin" aria-hidden="true" />}
+          <span className="term-status-label">{main.label}</span>
+          {main.detail !== '' && <span className="term-status-detail">{main.detail}</span>}
+        </span>
+      )}
+      {tasks !== undefined && (
+        <span className={`term-status term-tasks ${tasks.tone}`} title={tasks.title}>
+          {tasks.label}
+        </span>
+      )}
+    </>
+  )
+}
 
 export function Terminal({ kind }: { kind: TerminalKind }) {
   const host = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<string>('starting…')
   const [command, setCommand] = useState<string>('')
   const [linked, setLinked] = useState(false)
+  const [program, setProgram] = useState<ProgramView>(NO_PROGRAM)
 
   useEffect(() => {
     const el = host.current
@@ -43,10 +68,13 @@ export function Terminal({ kind }: { kind: TerminalKind }) {
       if (ev.type === 'data') term.write(ev.data)
       else if (ev.type === 'exit') {
         setStatus(`exited (${ev.exitCode})`)
+        // whatever it last reported is over with the process
+        setProgram(NO_PROGRAM)
         term.write('\r\n\x1b[2m[process exited]\x1b[0m\r\n')
         const s = useStore.getState().session
         if (s?.ptyId === ev.id) useStore.getState().setSession({ ...s, ended: true })
       } else if (ev.type === 'title') setStatus(ev.title)
+      else if (ev.type === 'program') setProgram(p => applyProgram(p, ev.status))
     })
     // the CLI connected to this window's IDE server (selection, @-mentions and diffs flow)
     const offIde = window.docent.ide.onEvent(ev => {
@@ -93,6 +121,8 @@ export function Terminal({ kind }: { kind: TerminalKind }) {
     }
   }, [kind])
 
+  const chips = useMemo(() => chipView(program), [program])
+
   return (
     <div className="term-wrap">
       <div className="term-bar">
@@ -100,6 +130,7 @@ export function Terminal({ kind }: { kind: TerminalKind }) {
         <span className="muted" title={command}>
           {status}
         </span>
+        <StatusChips view={chips} />
         {kind === 'claude' && (
           <span className={`link ${linked ? 'on' : ''}`} title={linked ? 'claude is connected to Docent (selection, @-mentions, diffs)' : 'claude has not connected to Docent yet'}>
             {linked ? 'IDE linked' : 'IDE…'}
