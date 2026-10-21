@@ -6,10 +6,16 @@ import { PtyManager, Workspace, buildClaudeArgs, buildClaudeEnv, loginShellPath,
 import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
 
 import type { DirEntry, PtyEvent, PtySpawnRequest, PtySpawnResult, WatchAction, WatchEvent, WatchHostStatus, WorkspaceInfo } from '../shared/ipc'
+import { Attention } from './attention'
 import { RendererIde } from './ide'
+import { registerRecap } from './recap'
+import { SessionFeeds } from './sessions'
+import { registerFileWatch } from './watchFiles'
 
 // DOCENT_SMOKE=1 opens the window with a plain shell in place of claude and quits after a few seconds;
 // DOCENT_SMOKE=claude does the same with the real claude. DOCENT_SMOKE_SHOT=<file.png> saves a capture first.
+// DOCENT_SMOKE=feed runs a shell as the claude terminal and follows session DOCENT_SMOKE_SID instead, a
+// transcript scripts/smoke-feed.mjs replays into $CLAUDE_CONFIG_DIR (no claude, no prompts).
 const SMOKE = process.env.DOCENT_SMOKE
 const log = (...parts: unknown[]) => console.log(new Date().toISOString(), '[docent]', ...parts)
 
@@ -42,6 +48,18 @@ let workspace = new Workspace(realpathSync(initialWorkspace()))
 let win: BrowserWindow | undefined
 let pairwatch: PairwatchHost | undefined
 const ide = new RendererIde({ win: () => win, root: () => workspace.root, version: app.getVersion(), log: m => log(m) })
+// before the window: on Windows this sets the AppUserModelID the 'needs you' toasts go out under
+const attention = new Attention({ win: () => win, log: m => log(m) })
+const sessions = new SessionFeeds({ win: () => win, log: m => log(m) })
+const fileWatch = registerFileWatch({ win: () => win, root: () => workspace.root, log: m => log(m) })
+registerRecap({
+  win: () => win,
+  live: ptyId => sessions.get(ptyId),
+  snapshot: sid => pairwatch?.sessions().find(s => s.sid === sid)?.snapshot,
+  cwd: () => workspace.root,
+  version: app.getVersion(),
+  log: m => log(m),
+})
 
 const info = (): WorkspaceInfo => ({ root: workspace.root, name: basename(workspace.root), claudeBinary, pairwatchDir: pairwatchDir() })
 const DOWN: WatchHostStatus = { mode: 'down', port: 0, note: 'Pairwatch host not started' }
@@ -99,6 +117,7 @@ ipcMain.handle('workspace:choose', async (): Promise<WorkspaceInfo | undefined> 
   const picked = r.filePaths[0]
   if (r.canceled || !picked) return undefined
   workspace = new Workspace(realpathSync(picked))
+  fileWatch.closeAll()
   return info()
 })
 ipcMain.handle('workspace:list', (_e, path: string): Promise<DirEntry[]> => workspace.list(path))
@@ -119,7 +138,7 @@ ipcMain.handle('pty:spawn', async (_e, req: PtySpawnRequest): Promise<PtySpawnRe
   let sessionId: string | undefined
   let idePort: number | undefined
   let ideServer: Awaited<ReturnType<RendererIde['start']>> | undefined
-  if (req.kind === 'claude' && SMOKE !== '1') {
+  if (req.kind === 'claude' && SMOKE !== '1' && SMOKE !== 'feed') {
     if (!claudeBinary) throw new Error('claude was not found on PATH. Install Claude Code, or set CLAUDE_BIN.')
     const viewer = pairwatch?.status()
     const settings = viewer && viewer.mode !== 'down' ? (JSON.parse(pairwatchSettings(viewer.port)) as object) : undefined
@@ -138,6 +157,7 @@ ipcMain.handle('pty:spawn', async (_e, req: PtySpawnRequest): Promise<PtySpawnRe
   } else {
     file = process.platform === 'win32' ? (process.env.COMSPEC ?? 'cmd.exe') : (process.env.SHELL ?? '/bin/zsh')
     args = process.platform === 'win32' ? [] : ['-l']
+    if (req.kind === 'claude' && SMOKE === 'feed') sessionId = process.env.DOCENT_SMOKE_SID
   }
   let h: ReturnType<PtyManager['spawn']>
   try {
@@ -148,16 +168,23 @@ ipcMain.handle('pty:spawn', async (_e, req: PtySpawnRequest): Promise<PtySpawnRe
   }
   if (ideServer) ide.bind(h.id, ideServer)
   if (sessionId) pairwatch?.setWatched(sessionId)
+  // on --resume the id is the resumed session's, so its transcript is read in full first
+  if (sessionId) sessions.start(h.id, sessionId, workspace.root)
   h.onData(data => send('pty:event', { type: 'data', id: h.id, data }))
   h.onExit(exitCode => {
     ide.detach(h.id)
+    sessions.stop(h.id)
+    attention.onProgram(h.id, { state: 'clear', at: Date.now() })
     send('pty:event', { type: 'exit', id: h.id, exitCode })
   })
   h.onOsc(ev => {
     if (ev.kind === 'title') send('pty:event', { type: 'title', id: h.id, title: ev.title })
     else if (ev.kind === 'status') {
       const status = parseProgramStatus(ev.raw, Date.now())
-      if (status) send('pty:event', { type: 'program', id: h.id, status })
+      if (status) {
+        send('pty:event', { type: 'program', id: h.id, status })
+        attention.onProgram(h.id, status)
+      }
     }
   })
   log(`spawned ${req.kind} pid ${h.pid}: ${file} ${args.join(' ')}${idePort ? ` (ide port ${idePort})` : ''}`)
@@ -174,11 +201,11 @@ async function smoke(): Promise<void> {
   h.onData(d => (out += d))
   h.onExit(code => log(`smoke pty exit ${code}: ${JSON.stringify(out.trim())}`))
   win?.webContents.once('did-finish-load', () => log('smoke: renderer loaded'))
-  const wait = SMOKE === 'claude' ? 15000 : 6000
+  const wait = SMOKE === 'claude' ? 15000 : SMOKE === 'feed' ? Number(process.env.DOCENT_SMOKE_WAIT ?? 20000) : 6000
   await new Promise(r => setTimeout(r, wait))
   try {
     const probe = await win?.webContents.executeJavaScript(
-      `JSON.stringify({ rows: document.querySelectorAll('.treelist .row').length, term: document.querySelector('.term-bar .muted')?.textContent, xtermRows: document.querySelectorAll('.xterm-rows > div').length, watch: document.querySelector('.watch')?.textContent?.slice(0, 160) })`,
+      `JSON.stringify({ rows: document.querySelectorAll('.treelist .row').length, term: document.querySelector('.term-bar .muted')?.textContent, xtermRows: document.querySelectorAll('.xterm-rows > div').length, watch: document.querySelector('.watch')?.textContent?.slice(0, 160), steps: document.querySelectorAll('.watch-step').length, turn: document.querySelector('.watch-turn')?.textContent?.slice(0, 120), heat: document.querySelectorAll('.heat-dot, .treelist .row[style*="background-image"]').length, tabs: [...document.querySelectorAll('.tabs .tab')].map(t => t.textContent), follow: document.querySelector('.follow')?.textContent })`,
     )
     log(`smoke: dom ${probe}`)
     log(`smoke: pairwatch ${JSON.stringify(pairwatch?.status() ?? DOWN)}, snapshots ${pairwatch?.sessions().length ?? 0}`)
@@ -199,7 +226,9 @@ async function smoke(): Promise<void> {
 let closing: Promise<void> | undefined
 function shutdown(graceMs: number): Promise<void> {
   closing ??= (async () => {
-    await Promise.allSettled([ptys.closeAll(graceMs), ide.closeAll(), pairwatch?.close()])
+    attention.dispose()
+    fileWatch.closeAll()
+    await Promise.allSettled([ptys.closeAll(graceMs), ide.closeAll(), pairwatch?.close(), sessions.closeAll()])
   })()
   return closing
 }

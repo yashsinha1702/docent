@@ -31,3 +31,16 @@ Every experiment that retired (or confirmed) a risk from the plan's assumptions 
 | A9 host mode | Docent bound 7979 and answered `/health`; in a later run a real viewer (started by the mod with `server.mjs --detach` when Docent's host went away at exit) held 7979 and Docent went into bridge mode, still receiving the snapshot. Both modes drive the Watch panel. |
 | IDE protocol (M6) | The CLI connected to `ws://127.0.0.1:<port>` within 1 s of spawn with only `CLAUDE_CODE_SSE_PORT` set (lock pid = Docent's main process): `notifications/initialized`, then `ide_connected {pid}`. The lock file is removed on exit. The terminal bar flips to "IDE linked". |
 | Tests | core 4, server 39 (ide 18, pairwatch 15, osc 3, spawn 3), app 35 (renderer ide relay 20, watch pure modules, editor helpers) — all under `node --test` with Node 22 type stripping. |
+
+## Live feed, follow mode, recap and packaging (2026-10-21, Claude Code 2.1.304)
+
+| Check | Result |
+| --- | --- |
+| Transcript structure (counts, enum values and key names only, never text) | CLI sessions end turns with a `system` `turn_duration` row (711 for 715 human prompts). 164 of 164 flat helper files start with a prompt equal to an Agent call's; 98 more sit under `subagents/workflows/<run>/` (not read yet). The longest line is 2.3 MB. |
+| Fold speed | A synthetic 35 MB transcript folds in 344 ms. On the four largest real sessions (7-24 MB, up to 150 helpers) the first update arrives in 0.5-0.8 s with at most 65 ms of event-loop stall, and the live feed equals the one-shot fold. |
+| `node scripts/smoke-feed.mjs` | The feed found the replayed transcript about 4 s after launch. The Watch panel drew the stage, card, lesson, goal and a 12-row steps strip from it, with the "waiting for the Pairwatch mod" note. Follow mode opened `math.ts`, the helper's `stats.ts` and the written test file, and `src` showed a heat dot. |
+| `DOCENT_SMOKE=claude` (trusted scratch folder, no prompt) | IDE linked in about 4 s, the mod's snapshot drove the panel, the terminal chip read "Idle" from the CLI's OSC 7501 reports, and nothing was logged as an error. The CLI's status line from the mod reads `pairwatch: pairwatch: idle`: a doubled prefix inside the mod (to fix there). |
+| Packaged app (mac arm64, unsigned, `--dir`) | 319 MB `.app` (27 MB asar). `spawn-helper` stays executable in `app.asar.unpacked`, and Pairwatch is under `Contents/Resources/pairwatch`. `DOCENT_SMOKE=1` on the packaged binary passed. `codesign --verify` fails on the unsigned bundle; an ad-hoc signature (`--sign -`) makes it pass. |
+| DMG | `Docent-0.0.1-mac-arm64.dmg`, 136 MB, built in 27 s; it mounts with `Docent.app` and an `Applications` link. |
+| Windows package from macOS | `electron-builder --win dir --x64` builds; `Docent.exe` carries the icon (16-256 px), and node-pty's `win32-x64` prebuilds (conpty) are in place. It has not been run on Windows. |
+| Tests | core 4, server 76, app 148, all under `node --test` (Node 22). |
