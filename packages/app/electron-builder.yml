@@ -1,20 +1,31 @@
+# Packaging (electron-builder 26). Run `npx electron-vite build` first: out/ is all the app code there is
+# (@docent/server and @docent/core are bundled into out/main; node-pty stays a real module). Unsigned at
+# v0.1 (docs/DECISIONS.md); docs/RELEASING.md says what that means for users and how to release.
 appId: com.yashsinha.docent
 productName: Docent
+# one naming scheme for every installer, without spaces: Docent-0.1.0-mac-arm64.dmg, Docent-0.1.0-linux-x86_64.AppImage
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 directories:
   output: release
+  # icon.png (1024 x 1024, made by scripts/make-icon.mjs from icon.svg): icon.icns and icon.ico are derived from it
   buildResources: build
 files:
   - out/**
   - package.json
+# a native addon cannot load from inside the asar, and its spawn-helper must stay an executable file
 asarUnpack:
   - "**/node_modules/node-pty/**"
 extraResources:
+  # the bundled Pairwatch plugin, passed to claude --plugin-dir (pairwatchDir() in src/main/index.ts)
   - from: ../../vendor/pairwatch/pairwatch
     to: pairwatch
     filter:
       - "**/*"
       - "!tests/**"
+      # written into the plugin folder by Claude Code on a developer's machine, never part of the plugin
       - "!.claude-plugin/types/**"
+      - "!tsconfig.json"
+# node-pty 1.1.0 ships N-API prebuilds that Electron loads unchanged (Linux builds it from source at npm ci)
 npmRebuild: false
 win:
   target:
@@ -23,11 +34,13 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  artifactName: "${productName}-Setup-${version}-${arch}.${ext}"
 mac:
   target:
     - target: dmg
       arch: [arm64, x64]
   category: public.app-category.developer-tools
+  # no signing at all; CI also sets CSC_IDENTITY_AUTO_DISCOVERY=false
   identity: null
 linux:
   target: [AppImage]

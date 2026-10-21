@@ -115,8 +115,11 @@ test('/health answers like the real viewer', async t => {
 test('the key file is made 0600 and reused; one already there is kept', async t => {
   const { dataDir, key, host } = await start(t)
   assert.match(key, /^[A-Za-z0-9_-]{20,}$/)
-  assert.equal((await stat(join(dataDir, 'viewer.token'))).mode & 0o777, 0o600)
-  assert.equal((await stat(join(dataDir, 'live'))).mode & 0o777, 0o700)
+  // Windows has no POSIX modes to check (the same guard as ide.spec.ts)
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(join(dataDir, 'viewer.token'))).mode & 0o777, 0o600)
+    assert.equal((await stat(join(dataDir, 'live'))).mode & 0o777, 0o700)
+  }
   await host.close()
   const again = await start(t, { dataDir })
   assert.equal(again.key, key)

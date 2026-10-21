@@ -1,0 +1,42 @@
+# Type-check, test and build on the three desktop platforms, for every push and pull request.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # vendor/pairwatch: the bundled Pairwatch plugin and the core the app is built on
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # node-pty ships prebuilds for macOS and Windows; on Linux it compiles here (node-gyp, python3, make, g++)
+      - run: npm ci
+
+      - run: npm run check
+
+      - run: npm test
+
+      - run: npm run build

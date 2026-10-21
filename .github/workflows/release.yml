@@ -1,0 +1,100 @@
+# Unsigned installers for macOS (dmg, arm64 and x64), Windows (NSIS, x64) and Linux (AppImage), built on a
+# version tag (v*) or by hand. They are uploaded as workflow artifacts; nothing is signed or published.
+# docs/RELEASING.md explains how to cut a release and what unsigned means for the people installing it.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # never look for a signing identity in the runner's keychain
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag names the app's version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(node -p "require('./packages/app/package.json').version")
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match packages/app/package.json version $version"
+            exit 1
+          fi
+
+  mac:
+    needs: version
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Package (dmg, arm64 and x64)
+        working-directory: packages/app
+        run: npx electron-builder --mac dmg --arm64 --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docent-mac
+          path: packages/app/release/*.dmg
+          if-no-files-found: error
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Package (NSIS installer, x64)
+        working-directory: packages/app
+        run: npx electron-builder --win nsis --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docent-windows
+          path: packages/app/release/*.exe
+          if-no-files-found: error
+
+  linux:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # node-pty has no Linux prebuild: npm ci compiles it with node-gyp (python3, make and g++ are on the runner)
+      - run: npm ci
+      - run: npm run build
+      - name: Package (AppImage, x64)
+        working-directory: packages/app
+        run: npx electron-builder --linux AppImage --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docent-linux
+          path: packages/app/release/*.AppImage
+          if-no-files-found: error

@@ -1,9 +1,12 @@
 // A session recap: one self-contained, redacted HTML file (stage, timeline of steps, files touched,
 // concepts met, tokens) that can be shared without Docent. See docs/PLAN.md M14.
 //
-// API stub: the shape is fixed here; the implementation lands in render.ts.
+// The shape is fixed here; the document is built in render.ts.
+import { homedir } from 'node:os'
+
 import type { Snapshot } from '../pairwatch/types.ts'
 import type { SessionUpdate } from '../sessions/types.ts'
+import { renderRecap } from './render.ts'
 
 export type RecapInput = {
   update: SessionUpdate
@@ -19,6 +22,6 @@ export type RecapInput = {
 }
 
 /** The recap as one HTML document: no scripts, no external requests, every free text passed through redactSecrets. */
-export function renderRecapHtml(_input: RecapInput): string {
-  throw new Error('not implemented')
+export function renderRecapHtml(input: RecapInput): string {
+  return renderRecap(input, homedir())
 }
