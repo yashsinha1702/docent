@@ -15,7 +15,15 @@ export type TerminalSession = { sid: string; ptyId: string; ended?: boolean }
  * (inside the workspace) or workspace-relative; lines are 1-based and inclusive; `kind` says how the editor
  * marks them: a read wash, an edit highlight, or a plain jump.
  */
-export type LineTarget = { path: string; fromLine?: number; toLine?: number; kind: 'read' | 'edit' | 'jump'; focus: boolean }
+export type LineTarget = {
+  path: string
+  fromLine?: number
+  toLine?: number
+  /** text to find and mark instead of (or near) the lines, e.g. an edit's new_string */
+  find?: string
+  kind: 'read' | 'edit' | 'jump'
+  focus: boolean
+}
 
 type State = {
   workspace?: WorkspaceInfo
