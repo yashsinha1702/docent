@@ -6,6 +6,7 @@ import type { Socket } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
+import { pathToFileURL } from 'node:url'
 
 import WebSocket from 'ws'
 
@@ -35,7 +36,7 @@ const SELECTION: Selection = {
   text: 'const x = 1',
   selection: { start: { line: 3, character: 0 }, end: { line: 3, character: 11 }, isEmpty: false },
 }
-const WIRE_SELECTION = { text: SELECTION.text, filePath: OPEN_FILE, fileUrl: `file://${OPEN_FILE}`, selection: SELECTION.selection }
+const WIRE_SELECTION = { text: SELECTION.text, filePath: OPEN_FILE, fileUrl: pathToFileURL(OPEN_FILE).href, selection: SELECTION.selection }
 
 const stubHost = (overrides: Partial<IdeHost> = {}): IdeHost => ({
   workspaceFolders: () => FOLDERS,
@@ -240,7 +241,7 @@ test('the lock file names the port, carries the token and goes away on close', a
       workspaceFolders: FOLDERS,
       ideName: 'Docent Test',
       transport: 'ws',
-      runningInWindows: false,
+      runningInWindows: process.platform === 'win32',
       authToken: server.authToken,
     })
     if (process.platform !== 'win32') {
@@ -278,7 +279,7 @@ test('getWorkspaceFolders answers the host folders in the extension shape', asyn
     assert.equal(result.isError, undefined)
     assert.deepEqual(JSON.parse(textOf(result)), {
       success: true,
-      folders: FOLDERS.map((p, index) => ({ name: path.basename(p), uri: `file://${p}`, path: p, index })),
+      folders: FOLDERS.map((p, index) => ({ name: path.basename(p), uri: pathToFileURL(p).href, path: p, index })),
       rootPath: FOLDERS[0],
       workspaceFile: null,
     })
@@ -498,7 +499,7 @@ test('openFile opens through the host and reports what the extension would', asy
       assert.deepEqual(background, {
         success: true,
         filePath: file,
-        fileUrl: `file://${file}`,
+        fileUrl: pathToFileURL(file).href,
         message: `Opened file: ${file}`,
         languageId: 'markdown',
         lineCount: 4,
