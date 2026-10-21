@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-import type { DocentApi, IdeEvent, PtyEvent, WatchEvent } from '../shared/ipc'
+import type { DocentApi, FileChange, IdeEvent, PtyEvent, SessionEvent, WatchEvent } from '../shared/ipc'
 
 const on = <T>(channel: string, fn: (e: T) => void) => {
   const listener = (_e: Electron.IpcRendererEvent, ev: T) => fn(ev)
@@ -15,6 +15,8 @@ const api: DocentApi = {
     list: path => ipcRenderer.invoke('workspace:list', path),
     read: path => ipcRenderer.invoke('workspace:read', path),
     write: (path, text) => ipcRenderer.invoke('workspace:write', path, text),
+    watch: paths => ipcRenderer.send('workspace:watch', paths),
+    onChanged: fn => on<FileChange>('workspace:changed', fn),
   },
   pty: {
     spawn: req => ipcRenderer.invoke('pty:spawn', req),
@@ -34,6 +36,13 @@ const api: DocentApi = {
     sessions: () => ipcRenderer.invoke('watch:sessions'),
     host: () => ipcRenderer.invoke('watch:host'),
     action: (sid, action, value) => ipcRenderer.invoke('watch:action', sid, action, value),
+  },
+  session: {
+    onEvent: fn => on<SessionEvent>('session:event', fn),
+    get: ptyId => ipcRenderer.invoke('session:get', ptyId),
+  },
+  recap: {
+    export: ptyId => ipcRenderer.invoke('recap:export', ptyId),
   },
 }
 

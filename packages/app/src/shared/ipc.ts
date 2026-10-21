@@ -1,5 +1,10 @@
 // The contract between the renderer and the main process. Plain JSON both ways.
 import type { Snapshot } from '../../../server/src/pairwatch/types'
+import type { ProgramStatus } from '../../../server/src/pty/types'
+import type { SessionUpdate } from '../../../server/src/sessions/types'
+
+export type { ProgramState, ProgramStatus } from '../../../server/src/pty/types'
+export type { SessionModel, SessionUpdate, SessionUsage, Step, StepInput, TokenCounts } from '../../../server/src/sessions/types'
 
 export type DirEntry = { name: string; path: string; kind: 'file' | 'dir'; size?: number; mtimeMs?: number }
 
@@ -13,7 +18,8 @@ export type PtyEvent =
   | { type: 'data'; id: string; data: string }
   | { type: 'exit'; id: string; exitCode: number }
   | { type: 'title'; id: string; title: string }
-  | { type: 'status'; id: string; raw: string }
+  /** Claude Code's OSC 7501 program status (working / blocked on you / done / idle / error), parsed */
+  | { type: 'program'; id: string; status: ProgramStatus }
 
 export type WorkspaceInfo = { root: string; name: string; claudeBinary?: string; pairwatchDir?: string }
 
@@ -54,6 +60,20 @@ export type WatchEvent =
   | { type: 'removed'; sid: string }
   | { type: 'host'; status: WatchHostStatus }
 
+// ---- Live session: the transcript folded by Pairwatch's own reducer (packages/server/src/sessions).
+
+/** One claude terminal's live model; `ptyId` names the terminal it runs in. */
+export type LiveSession = SessionUpdate & { ptyId: string }
+export type SessionEvent =
+  | { type: 'update'; live: LiveSession }
+  /** spawned; the transcript is not written yet (Claude Code writes it at the first prompt) */
+  | { type: 'waiting'; ptyId: string; sid: string }
+  /** the terminal exited; the last update stays valid */
+  | { type: 'closed'; ptyId: string; sid: string }
+
+/** A watched file changed on disk; `path` is workspace-relative. */
+export type FileChange = { path: string; kind: 'change' | 'unlink' }
+
 export type DocentApi = {
   workspace: {
     get(): Promise<WorkspaceInfo>
@@ -61,6 +81,9 @@ export type DocentApi = {
     list(path: string): Promise<DirEntry[]>
     read(path: string): Promise<string>
     write(path: string, text: string): Promise<void>
+    /** the files to watch for outside changes (the open tabs), workspace-relative; replaces the previous set */
+    watch(paths: string[]): void
+    onChanged(fn: (e: FileChange) => void): () => void
   }
   pty: {
     spawn(req: PtySpawnRequest): Promise<PtySpawnResult>
@@ -80,5 +103,13 @@ export type DocentApi = {
     sessions(): Promise<WatchSession[]>
     host(): Promise<WatchHostStatus>
     action(sid: string, action: WatchAction, value?: string): Promise<void>
+  }
+  session: {
+    onEvent(fn: (e: SessionEvent) => void): () => void
+    get(ptyId: string): Promise<LiveSession | undefined>
+  }
+  recap: {
+    /** asks where to save, writes the session's recap HTML there; undefined if cancelled or nothing to recap */
+    export(ptyId: string): Promise<{ path: string } | undefined>
   }
 }

@@ -6,6 +6,7 @@ import * as pty from 'node-pty'
 
 import { OscParser } from './osc.ts'
 import type { OscEvent } from './osc.ts'
+import { PROGRAM_STATUS_REPLY } from './status.ts'
 
 export type PtySpawnOptions = {
   file: string
@@ -14,6 +15,8 @@ export type PtySpawnOptions = {
   env: NodeJS.ProcessEnv
   cols: number
   rows: number
+  /** answer Claude Code's `OSC 7501 ; ?` probe so it reports working / blocked / done (default true) */
+  answerStatusProbe?: boolean
 }
 
 export type PtyHandle = {
@@ -44,7 +47,10 @@ export class PtyManager {
       env,
     })
     const events = new EventEmitter()
-    const osc = new OscParser(e => events.emit('osc', e))
+    const osc = new OscParser(e => {
+      if (e.kind === 'status-probe' && opts.answerStatusProbe !== false) term.write(PROGRAM_STATUS_REPLY)
+      events.emit('osc', e)
+    })
     term.onData(d => {
       events.emit('data', d)
       osc.feed(d)

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 
 import { Editor } from './editor/Editor'
+import { startLiveFeed } from './live'
 import { useStore } from './store'
 import { Terminal } from './terminal/Terminal'
 import { Tree } from './tree/Tree'
@@ -12,6 +13,7 @@ export function App() {
   useEffect(() => {
     void window.docent.workspace.get().then(setWorkspace)
   }, [setWorkspace])
+  useEffect(() => startLiveFeed(), [])
 
   const choose = async () => {
     const w = await window.docent.workspace.choose()

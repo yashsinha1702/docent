@@ -2,7 +2,7 @@ import { existsSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
 import type { PairwatchHost } from '@docent/server'
-import { PtyManager, Workspace, buildClaudeArgs, buildClaudeEnv, loginShellPath, pairwatchSettings, resolveClaudeBinary, startPairwatchHost } from '@docent/server'
+import { PtyManager, Workspace, buildClaudeArgs, buildClaudeEnv, loginShellPath, pairwatchSettings, parseProgramStatus, resolveClaudeBinary, startPairwatchHost } from '@docent/server'
 import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
 
 import type { DirEntry, PtyEvent, PtySpawnRequest, PtySpawnResult, WatchAction, WatchEvent, WatchHostStatus, WorkspaceInfo } from '../shared/ipc'
@@ -155,7 +155,10 @@ ipcMain.handle('pty:spawn', async (_e, req: PtySpawnRequest): Promise<PtySpawnRe
   })
   h.onOsc(ev => {
     if (ev.kind === 'title') send('pty:event', { type: 'title', id: h.id, title: ev.title })
-    else if (ev.kind === 'status') send('pty:event', { type: 'status', id: h.id, raw: ev.raw })
+    else if (ev.kind === 'status') {
+      const status = parseProgramStatus(ev.raw, Date.now())
+      if (status) send('pty:event', { type: 'program', id: h.id, status })
+    }
   })
   log(`spawned ${req.kind} pid ${h.pid}: ${file} ${args.join(' ')}${idePort ? ` (ide port ${idePort})` : ''}`)
   return { id: h.id, sessionId, command: [basename(file), ...args].join(' '), idePort }
