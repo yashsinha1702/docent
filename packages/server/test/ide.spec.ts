@@ -43,7 +43,8 @@ const stubHost = (overrides: Partial<IdeHost> = {}): IdeHost => ({
   openEditors: () => [{ path: OPEN_FILE, dirty: true, active: true }],
   currentSelection: () => undefined,
   latestSelection: () => undefined,
-  isDirty: p => (p === OPEN_FILE ? true : undefined),
+  // normalized: on Windows a path joined onto these POSIX-style roots comes back with backslashes
+  isDirty: p => (path.normalize(p) === path.normalize(OPEN_FILE) ? true : undefined),
   openDiff: async () => ({ outcome: 'rejected' }),
   closeTab: async () => true,
   closeAllDiffTabs: async () => 2,
@@ -413,7 +414,7 @@ test('selection and document tools answer in the extension words', async () => {
       isUntitled: false,
     })
     // a relative path resolves against the first workspace folder
-    assert.deepEqual(JSON.parse(textOf(await call(c, 'checkDocumentDirty', { filePath: 'src/main.ts' }))).filePath, OPEN_FILE)
+    assert.deepEqual(JSON.parse(textOf(await call(c, 'checkDocumentDirty', { filePath: 'src/main.ts' }))).filePath, path.join(FOLDERS[0]!, 'src/main.ts'))
     assert.deepEqual(JSON.parse(textOf(await call(c, 'checkDocumentDirty', { filePath: '/elsewhere.ts' }))), {
       success: false,
       message: 'Document not open: /elsewhere.ts',
@@ -433,7 +434,7 @@ test('selection and document tools answer in the extension words', async () => {
     assert.deepEqual(editors, {
       tabs: [
         {
-          uri: `file://${OPEN_FILE}`,
+          uri: pathToFileURL(OPEN_FILE).href,
           isActive: true,
           isPinned: false,
           isPreview: false,
