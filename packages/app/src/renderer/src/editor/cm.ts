@@ -3,9 +3,11 @@ import { languages } from '@codemirror/language-data'
 import type { Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 
-/** The language support for a path, by extension or file name, when language-data knows one. */
+import { basename } from './paths'
+
+/** The language support for a path (relative, or absolute in either style), by extension or file name, when language-data knows one. */
 export const languageOf = async (path: string): Promise<Extension | undefined> => {
-  const name = path.split('/').pop() ?? ''
+  const name = basename(path)
   const ext = name.includes('.') ? name.split('.').pop()! : ''
   const desc = languages.find(l => l.extensions.includes(ext) || l.filename?.test(name))
   return desc ? desc.load() : undefined

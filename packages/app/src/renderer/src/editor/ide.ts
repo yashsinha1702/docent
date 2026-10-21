@@ -1,11 +1,13 @@
 // The editor's side of the IDE protocol. Main relays the CLI's tool calls here as IdeRequests
 // (openDiff, closeTab, closeAllDiffTabs, openFile, saveDocument); each gets exactly one reply.
 // The module also reports the editor state (open files, active file, selection) after every change,
-// and sends @-mentions. Started once, from the Editor.
+// and sends @-mentions. Started once, from the Editor. Every absolute path sent to the CLI comes from
+// paths.ts `absolute`, so it is in the root's own style (backslashes under a Windows root).
 import type { EditorState } from '@codemirror/state'
 
 import type { EditorState as IdeEditorState, IdeReply, IdeRequest } from '../../../shared/ipc'
-import { useStore } from '../store'
+import { findFile, useStore } from '../store'
+import { lf } from './lines'
 import { absolute, relativeTo } from './paths'
 import { atMentionOf, findRange, selectionInfo } from './selection'
 
@@ -33,13 +35,21 @@ const root = (): string | undefined => useStore.getState().workspace?.root
 
 // ---- editor state
 
+/**
+ * What the CLI is told: the user's tabs, and the file on show with its selection only when the user (or Claude's
+ * openFile) put it there. Follow mode's tabs and switches are Claude's own doing: reported, the CLI would mark
+ * such a file active and tell Claude, with the next prompt, that the user has it open. Without a selection in a
+ * report, main sends no selection_changed, so the CLI keeps the user's last one. A diff on top is not a text
+ * editor either: then nothing is active.
+ */
 const editorState = (): IdeEditorState => {
-  const { workspace, files, active, activeDiff } = useStore.getState()
+  const { workspace, files, active, activeBy, activeDiff } = useStore.getState()
   if (!workspace) return { open: [] }
-  const open = files.map(f => ({ path: absolute(workspace.root, f.path), dirty: f.dirty }))
-  // a diff on top is not a text editor: then nothing is active and there is no selection
-  const activePath = active !== undefined && activeDiff === undefined ? absolute(workspace.root, active) : undefined
-  const selection = activePath !== undefined && shown !== undefined && shown.path === active ? selectionInfo(shown.state, activePath) : undefined
+  const mine = files.filter(f => f.auto === undefined)
+  const open = mine.map(f => ({ path: absolute(workspace.root, f.path), dirty: f.dirty }))
+  const onShow = activeDiff === undefined && activeBy !== 'follow' ? mine.find(f => f.path === active) : undefined
+  const activePath = onShow && absolute(workspace.root, onShow.path)
+  const selection = activePath !== undefined && shown !== undefined && shown.path === onShow?.path ? selectionInfo(shown.state, activePath) : undefined
   return { open, active: activePath, selection }
 }
 
@@ -75,9 +85,10 @@ export function atMention(path: string, state: EditorState): void {
  * Accept: answer `saved` with the right side and close the diff. The file is not written here: the CLI
  * (2.1.303, as with the VS Code extension's FILE_SAVED) turns the accepted text into its Edit/Write tool's
  * input and writes it itself, and a write from here first would fail that tool with "File has been
- * modified since read". An open tab of the file takes the accepted text straight away: the CLI writes
- * the same text a moment later and nothing watches the disk yet. Returns an error message instead when
- * the diff is gone or its file lies outside the workspace; the tab then stays.
+ * modified since read". An open tab of the file takes the accepted text straight away, as the text the
+ * disk is about to hold: when the CLI writes it a moment later, the outside-change watcher finds nothing
+ * new (store.reload records it, see outside.ts), so the tab does not flicker. Returns an error message
+ * instead when the diff is gone or its file lies outside the workspace; the tab then stays.
  */
 export function acceptDiff(id: string, contents: string): string | undefined {
   const s = useStore.getState()
@@ -86,7 +97,8 @@ export function acceptDiff(id: string, contents: string): string | undefined {
   if (!d || r === undefined) return 'diff is gone'
   const rel = relativeTo(r, d.newPath)
   if (rel === undefined) return 'outside workspace'
-  if (s.files.some(f => f.path === rel)) s.reload(rel, contents)
+  const open = findFile(s, rel)
+  if (open) s.reload(open.path, contents)
   reply(id, { outcome: 'saved', contents })
   s.closeDiff(id)
   return undefined
@@ -144,15 +156,16 @@ const openFile = async (req: Req<'openFile'>): Promise<void> => {
   const rel = r === undefined ? undefined : relativeTo(r, req.path)
   if (rel === undefined) return reply(req.id, { ok: false, error: 'outside workspace' })
   try {
-    await useStore.getState().open(rel)
+    await useStore.getState().open(rel, { by: 'cli' })
   } catch (e) {
     return reply(req.id, { ok: false, error: message(e) })
   }
-  const file = useStore.getState().files.find(f => f.path === rel)
+  const file = findFile(useStore.getState(), rel)
   if (!file) return reply(req.id, { ok: false, error: 'not open' })
-  const range = req.startText ? findRange(file.text, req.startText, req.endText, req.selectToEndOfLine) : undefined
+  // offsets as the editor counts them (a CRLF line break is one character there)
+  const range = req.startText ? findRange(lf(file.text), lf(req.startText), req.endText && lf(req.endText), req.selectToEndOfLine) : undefined
   // the tab is shown either way (VS Code shows the document too); makeFrontmost decides who keeps the focus
-  useStore.getState().reveal(rel, { range, focus: req.makeFrontmost })
+  useStore.getState().reveal(file.path, { range, focus: req.makeFrontmost })
   reply(req.id, { ok: true })
 }
 
@@ -161,9 +174,10 @@ const saveDocument = async (req: Req<'saveDocument'>): Promise<void> => {
   const rel = r === undefined ? undefined : relativeTo(r, req.path)
   if (rel === undefined) return reply(req.id, { ok: false, error: 'outside workspace' })
   const s = useStore.getState()
-  if (!s.files.some(f => f.path === rel)) return reply(req.id, { ok: false, error: 'not open' })
+  const open = findFile(s, rel)
+  if (!open) return reply(req.id, { ok: false, error: 'not open' })
   try {
-    await s.save(rel)
+    await s.save(open.path)
     reply(req.id, { ok: true })
   } catch (e) {
     reply(req.id, { ok: false, error: message(e) })
